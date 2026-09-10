@@ -1,4 +1,4 @@
-const RAW_SCRIPT_URL = "https://raw.githubusercontent.com/AKIVC/GKCProxy/main/script.js";
+const RAW_SCRIPT_URL = "https://raw.githubusercontent.com/AKIVC/GKCProxy/refs/heads/main/script.js";
 
 async function fetchScript() {
   const r = await fetch(RAW_SCRIPT_URL);
