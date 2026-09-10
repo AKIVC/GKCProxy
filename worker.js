@@ -1,11 +1,7 @@
 const RAW_SCRIPT_URL = "https://raw.githubusercontent.com/AKIVC/GKCProxy/main/script.js";
 
 async function fetchScript() {
-  const r = await fetch(RAW_SCRIPT_URL, {
-    headers: {
-      "Authorization": `Bearer ${GITHUB_TOKEN}`
-    }
-  });
+  const r = await fetch(RAW_SCRIPT_URL);
   if (!r.ok) {
     throw new Error(`Failed to fetch script.js: ${r.status}`);
   }
@@ -16,7 +12,7 @@ export default {
   async fetch(req) {
     const url = new URL(req.url);
 
-    // Serve script.js (from private GitHub via token)
+    // Serve script.js via Worker
     if (url.pathname === "/script.js") {
       const js = await fetchScript();
       return new Response(js, {
@@ -43,7 +39,7 @@ export default {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    // Forward normal HTTP request to Gimkit
+    // Forward HTTP request to Gimkit
     const forwardHeaders = new Headers(req.headers);
     forwardHeaders.set("host", "www.gimkit.com");
     forwardHeaders.set("origin", "https://www.gimkit.com");
@@ -73,7 +69,7 @@ export default {
     headers.delete("content-security-policy");
     headers.delete("content-security-policy-report-only");
 
-    // Rewrite redirects to your domain
+    // Rewrite redirects
     if (headers.has("location")) {
       headers.set(
         "location",
@@ -81,7 +77,7 @@ export default {
       );
     }
 
-    // HTML: inject bootstrap loader into <body> so React can't wipe it
+    // Inject loader into <body> so React can't wipe it
     if ((headers.get("content-type") || "").includes("text/html")) {
       const rewriter = new HTMLRewriter()
         .on("body", {
@@ -107,7 +103,7 @@ export default {
       return rewriter.transform(new Response(gim.body, { status: gim.status, headers }));
     }
 
-    // Non-HTML: just proxy through
+    // Non-HTML passthrough
     return new Response(gim.body, { status: gim.status, headers });
   }
 };
