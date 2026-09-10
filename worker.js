@@ -10,10 +10,10 @@ async function fetchScript() {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req) {
     const url = new URL(req.url);
 
-    // Serve script.js from GitHub
+    // Serve script.js
     if (url.pathname === "/script.js") {
       const js = await fetchScript();
       return new Response(js, {
@@ -36,23 +36,10 @@ export default {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    // Forward request to Gimkit
+    // Forward request
     const forwardHeaders = new Headers(req.headers);
     forwardHeaders.set("host", "www.gimkit.com");
     forwardHeaders.set("origin", "https://www.gimkit.com");
-
-    // Remove headers that break proxying
-    [
-      "cf-connecting-ip",
-      "cf-ipcountry",
-      "cf-ray",
-      "cf-visitor",
-      "connection",
-      "upgrade",
-      "sec-websocket-key",
-      "sec-websocket-version",
-      "sec-websocket-protocol"
-    ].forEach(h => forwardHeaders.delete(h));
 
     const gim = await fetch("https://www.gimkit.com" + url.pathname + url.search, {
       method: req.method,
@@ -61,7 +48,6 @@ export default {
     });
 
     const headers = new Headers(gim.headers);
-    let body = await gim.text();
 
     // Strip anti-iframe headers
     headers.delete("x-frame-options");
@@ -76,16 +62,18 @@ export default {
       );
     }
 
-    // Inject script + rewrite absolute URLs
+    // Only rewrite HTML
     if ((headers.get("content-type") || "").includes("text/html")) {
-      body = body
-        .replace("<head>", `<head><script src="/script.js"></script>`)
-        .replaceAll("https://www.gimkit.com", "https://" + url.hostname);
+      const rewriter = new HTMLRewriter()
+        .on("head", {
+          element(el) {
+            el.append(`<script src="/script.js"></script>`, { html: true });
+          }
+        });
+
+      return rewriter.transform(new Response(gim.body, { headers }));
     }
 
-    return new Response(body, {
-      status: gim.status,
-      headers
-    });
+    return new Response(gim.body, { status: gim.status, headers });
   }
 };
