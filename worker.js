@@ -6,6 +6,9 @@ async function fetchScript() {
       "Authorization": `Bearer ${GITHUB_TOKEN}`
     }
   });
+  if (!r.ok) {
+    throw new Error(`Failed to fetch script.js: ${r.status}`);
+  }
   return await r.text();
 }
 
@@ -13,7 +16,7 @@ export default {
   async fetch(req) {
     const url = new URL(req.url);
 
-    // Serve script.js
+    // Serve script.js (from private GitHub via token)
     if (url.pathname === "/script.js") {
       const js = await fetchScript();
       return new Response(js, {
@@ -28,18 +31,34 @@ export default {
       server.accept();
 
       server.addEventListener("message", async (e) => {
-        const { path } = JSON.parse(e.data);
-        const r = await fetch("https://www.gimkit.com" + path);
-        server.send(await r.text());
+        try {
+          const { path } = JSON.parse(e.data);
+          const r = await fetch("https://www.gimkit.com" + path);
+          server.send(await r.text());
+        } catch (err) {
+          server.send(JSON.stringify({ error: err.message }));
+        }
       });
 
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    // Forward request
+    // Forward normal HTTP request to Gimkit
     const forwardHeaders = new Headers(req.headers);
     forwardHeaders.set("host", "www.gimkit.com");
     forwardHeaders.set("origin", "https://www.gimkit.com");
+
+    [
+      "cf-connecting-ip",
+      "cf-ipcountry",
+      "cf-ray",
+      "cf-visitor",
+      "connection",
+      "upgrade",
+      "sec-websocket-key",
+      "sec-websocket-version",
+      "sec-websocket-protocol"
+    ].forEach(h => forwardHeaders.delete(h));
 
     const gim = await fetch("https://www.gimkit.com" + url.pathname + url.search, {
       method: req.method,
@@ -54,7 +73,7 @@ export default {
     headers.delete("content-security-policy");
     headers.delete("content-security-policy-report-only");
 
-    // Rewrite redirects
+    // Rewrite redirects to your domain
     if (headers.has("location")) {
       headers.set(
         "location",
@@ -62,18 +81,33 @@ export default {
       );
     }
 
-    // Only rewrite HTML
+    // HTML: inject bootstrap loader into <body> so React can't wipe it
     if ((headers.get("content-type") || "").includes("text/html")) {
       const rewriter = new HTMLRewriter()
-        .on("head", {
+        .on("body", {
           element(el) {
-            el.append(`<script src="/script.js"></script>`, { html: true });
+            el.append(
+              `<script>
+                (function() {
+                  try {
+                    var s = document.createElement('script');
+                    s.src = '/script.js';
+                    s.async = true;
+                    document.body.appendChild(s);
+                  } catch (e) {
+                    console.error('Injection bootstrap failed:', e);
+                  }
+                })();
+              </script>`,
+              { html: true }
+            );
           }
         });
 
-      return rewriter.transform(new Response(gim.body, { headers }));
+      return rewriter.transform(new Response(gim.body, { status: gim.status, headers }));
     }
 
+    // Non-HTML: just proxy through
     return new Response(gim.body, { status: gim.status, headers });
   }
 };
